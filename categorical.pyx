@@ -154,16 +154,15 @@ class OnlineLDA:
         # Initialize the variational distribution q(beta|lambda)
         self._lambda = 1*n.random.gamma(100., 1./100., (self._K, self._W))
         self._eta = n.random.randn(self._C, self._K)
-
+        self._eta[-1,:] = n.zeros(self._K)
+        
     def _dgamma(self, gamma, phi_sum, y):
         cdef n.ndarray[DTYPE_t, ndim=2, mode="c"] eta_c = double_matrix(self._eta)
         cdef n.ndarray[DTYPE_t, mode="c"] phi_sum_c = double_array(phi_sum)
         cdef n.ndarray[DTYPE_t, mode="c"] gamma_c = double_array(gamma)
         cdef double *dgammas_c = compute_dgamma(self._alpha, &gamma_c[0], &phi_sum_c[0],
                                                   &eta_c[0,0], self._C, self._K, y);
-        dgammas = n.zeros(self._K)
-        for i in range(self._K):
-            dgammas[i] = dgammas_c[i]
+        dgammas = n.array([dgammas_c[i] for i in range(self._K)])
         free(dgammas_c)
         return dgammas
 
@@ -175,9 +174,10 @@ class OnlineLDA:
         return likelihood
 
     def _deta_1d(self, eta, gammas, ys):
-        eta_2d = eta.reshape(self._C, self._K)
+        eta_2d = eta.reshape(self._C - 1, self._K)
+        eta_2d = n.vstack([eta_2d, n.zeros(self._K)])
         deta = self._deta(eta_2d, gammas, ys)
-        return deta.flatten()
+        return deta[:self._C-1,:].flatten()
 
     def _deta(self, eta, gammas, ys):
         cdef n.ndarray[DTYPE_t, ndim=2, mode="c"] gamma_c = double_matrix(gammas)
@@ -185,15 +185,14 @@ class OnlineLDA:
         cdef n.ndarray[int, mode="c"] ys_c = int_array(ys)
         cdef double *detas_c = compute_deta_batch(&gamma_c[0,0], &eta_c[0,0], &ys_c[0], self._C, self._K, len(ys))
 
-        detas = n.zeros((self._C, self._K))
-        for c in range(self._C):
-            for i in range(self._K):
-                detas[c,i] = detas_c[c*self._K+i]  
+        detas = [detas_c[i] for i in range(self._C * self._K)]
+        detas = n.reshape(detas, (self._C, self._K))
         free(detas_c)
         return detas
 
     def _likelihood_eta_1d(self, eta, gammas, ys):
-        eta_2d = eta.reshape(self._C, self._K)
+        eta_2d = eta.reshape(self._C - 1, self._K)
+        eta_2d = n.vstack([eta_2d, n.zeros(self._K)])
         return self._likelihood_eta(eta_2d, gammas, ys)
 
     def _likelihood_eta(self, eta, gammas, ys):
@@ -220,10 +219,11 @@ class OnlineLDA:
         g = lambda x: -self._deta_1d(x, gammas, ys).flatten()
         new_eta = eta
         options = { "maxiter": maxiter }
-        eta = n.random.randn(self._C * self._K)
-        res = minimize(f, eta, method='BFGS', jac=g, options=options)
+        eta = n.random.randn((self._C - 1) * self._K)
+        res = minimize(f, eta, method='L-BFGS-B', jac=g, options=options)
         if res.success:
-            new_eta = res.x.reshape(self._C, self._K)
+            new_eta = res.x.reshape(self._C - 1, self._K)
+            new_eta = n.vstack([new_eta, n.zeros(self._K)])
         return new_eta
 
     def estimate_gamma(self, docs):
@@ -349,7 +349,7 @@ class OnlineLDA:
         self._lambda = self._lambda * (1-rhot) + \
             rhot * (self._zeta + self._D * sstats / batchD)
         # self._eta = self._eta * (1-rhot) + \
-        #     self._optimize_eta(self._eta, gammas, ys) * self._D / batchD
+        #   rhot * self._optimize_eta(self._eta, gammas, ys) * self._D / batchD
         self._eta += rhot * self._deta(self._eta, gammas, ys) * self._D / batchD        
         self._updatect += 1
         print self._eta
@@ -367,15 +367,8 @@ class OnlineLDA:
             self.update_lambda(wordids, wordcts, batch_ys)
 
     def _mle_predict(self, gamma):
-        gamma_0 = gamma.sum()
-        pred = 0
-        max_prod = float('-inf')
-        for c in range(self._C):
-            prod = self._eta[c, :].dot(gamma)
-            if prod > max_prod:
-                max_prod = prod
-                pred = c
-        return pred
+        probs = [self._eta[c,:].dot(gamma) for c in range(self._C)]
+        return n.argmax(probs)
 
     def predict(self, docs):
         wordids, wordcts = parse_doc_list(docs, self._vocab)

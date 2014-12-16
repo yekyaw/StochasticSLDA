@@ -2,6 +2,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <gsl/gsl_errno.h>
 #include <gsl/gsl_sf_gamma.h>
 #include <gsl/gsl_sf_psi.h>
@@ -182,8 +183,8 @@ double likelihood_gamma(double alpha, double *gamma, double *phi_sum, double *et
   double gamma_0 = sum(gamma, K);
   double psi_gamma_0 = digamma(gamma_0);
   double lngamma_gamma_0 = lgamma(gamma_0);
-  double linear_pred = 0;
-  for (int c = 0; c < C; c++) {
+  double linear_pred = 1;
+  for (int c = 0; c < C - 1; c++) {
     double P_c = exp(dot_product(gamma, &eta[c*K], K) / gamma_0);
     double M_c = compute_M(gamma, &eta[c*K], K);
     linear_pred += P_c * (1 + M_c / 2);
@@ -210,9 +211,9 @@ double compute_dgamma_i(double alpha, double *gamma, double *phi_sum, double *et
   double term2 = trigamma(gamma_0) * temp_sum;
   double term3 = (eta[y*K+i] * gamma_0 - dot_product(&eta[y*K], gamma, K)) / square(gamma_0);
 ;
-  double term4_denom = 0;
+  double term4_denom = 1;
   double term4_num = 0;
-  for (int c = 0; c < C; c++) {
+  for (int c = 0; c < C - 1; c++) {
     double P_c = exp(dot_product(gamma, &eta[c*K], K) / gamma_0);
     double M_c = compute_M(gamma, &eta[c*K], K);
     double coef = (eta[c*K+i] * gamma_0 - dot_product(&eta[c*K], gamma, K)) / square(gamma_0);
@@ -235,8 +236,8 @@ double *compute_dgamma(double alpha, double *gamma, double *phi_sum, double *eta
 double likelihood_eta(double *gamma, double *eta, int C, int K, int y) {
   double gamma_0 = sum(gamma, K);
   double term1 = dot_product(gamma, &eta[y*K], K) / gamma_0;
-  double term2 = 0;
-  for (int c = 0; c < C; c++) {
+  double term2 = 1;
+  for (int c = 0; c < C - 1; c++) {
     double P_c = exp(dot_product(gamma, &eta[c*K], K) / gamma_0);
     double M_c = compute_M(gamma, &eta[c*K], K);
     term2 += P_c * (1 + M_c / 2);
@@ -248,13 +249,13 @@ double likelihood_eta(double *gamma, double *eta, int C, int K, int y) {
 double *compute_deta(double *gamma, double *eta, int C, int K, int y) {
   double *detas = malloc_matrix(C, K);
   double gamma_0 = sum(gamma, K);
-  double term2_denom = 0;
-  for (int j = 0; j < C; j++) {
+  double term2_denom = 1;
+  for (int j = 0; j < C - 1; j++) {
     double P_c = exp(dot_product(gamma, &eta[j*K], K) / gamma_0);
     double M_c = compute_M(gamma, &eta[j*K], K);
     term2_denom += P_c * (1 + M_c / 2);
   }
-  for (int c = 0; c < C; c++) {
+  for (int c = 0; c < C - 1; c++) {
     double P_c = exp(dot_product(gamma, &eta[c*K], K) / gamma_0);
     double M_c = compute_M(gamma, &eta[c*K], K);
     for (int i = 0; i < K; i++) {
@@ -269,6 +270,7 @@ double *compute_deta(double *gamma, double *eta, int C, int K, int y) {
       }
     }
   }
+  memset(&eta[(C-1)*K], 0, K);
   return detas;
 }
 

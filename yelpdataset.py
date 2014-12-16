@@ -1,4 +1,3 @@
-import onlineldavb
 import categorical
 import numpy as n
 from sklearn import svm
@@ -10,17 +9,17 @@ def parse_labels(labels):
 
 def main():
     vocab = file('dictnostops.txt').readlines()
-    docs_all = file('dataset/docs_all.txt').readlines()[:2000]
-    labels_all = parse_labels(file('dataset/labels_stars.txt').readlines())[:2000]
+    docs_all = file('dataset/docs_newsgroups.txt').readlines()
+    labels_all = parse_labels(file('dataset/labels_newsgroups.txt').readlines())
     train_size = int(len(docs_all) * 2 / 3)
     docs_train = docs_all[:train_size]
     docs_test = docs_all[train_size:]
     labels_train = labels_all[:train_size]
     labels_test = labels_all[train_size:]
     D = len(docs_train)
-    K = 8
+    K = 10
     olda = categorical.OnlineLDA(vocab, 2, K, D, 1./K, 1./K, 64., 0.7)
-#    olda.update_lambda_all(docs_train, labels_train, 2)
+#    olda.update_lambda_all(docs_train, labels_train)
     olda.train(docs_train, labels_train, 20)
     
     preds1 = olda.predict(docs_test)

@@ -36,13 +36,13 @@ def parse_vocab(vocab):
 
 def main():
     vocab = parse_vocab(file('dictnostops.txt').readlines())
-    docs_all = parse_doc_list(file('dataset/docs_all.txt').readlines(), vocab)[:2000]
-    labels_all = parse_labels(file('dataset/labels_stars.txt').readlines())[:2000]
+    docs_all = parse_doc_list(file('dataset/docs_newsgroups.txt').readlines(), vocab)
+    labels_all = parse_labels(file('dataset/labels_newsgroups.txt').readlines())
     train_size = int(len(docs_all) * 2 / 3)
     labels_train = labels_all[:train_size]
     labels_test = labels_all[train_size:]
 
-    model = lda.LDA(n_topics=20)
+    model = lda.LDA(n_topics=10)
     model.fit(docs_all)
     gammas_all = model.doc_topic_
     gammas_train = gammas_all[:train_size, :]

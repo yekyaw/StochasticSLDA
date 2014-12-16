@@ -185,7 +185,7 @@ double likelihood_gamma(double alpha, double *gamma, double *phi_sum, double *et
   double Q = dot_product(gamma, eta, K) / gamma_0;
   double P = exp(Q);
   double M = compute_M(gamma, eta, K);
-  double const_terms = -lngamma_gamma_0 + y * Q - log(1 + P) - P * M / (2 * square(1 + P));
+  double const_terms = -lngamma_gamma_0 + y * Q - log(1 + P * (1 + M / 2));
   double sum = const_terms;
   for (int i = 0; i < K; i++) {
     double coef = digamma(gamma[i]) - psi_gamma_0;
@@ -206,8 +206,8 @@ double compute_dgamma_i(double alpha, double *gamma, double *phi_sum, double *et
   double M = compute_M(gamma, eta, K);
   
   double coef = (eta[i] * gamma_0 - dot_product(eta, gamma, K)) / square(gamma_0);
-  double term3 = coef * (y - P / (1 + P) + P * (P - 1) * M / (2 * cube(1 + P)));
-  double term4 = P / (2 * square(1 + P)) * dM_dgamma_i(gamma, eta, K, i);
+  double term3 = coef * y;
+  double term4 = (P * coef * (1 + M / 2) + dM_dgamma_i(gamma, eta, K, i)) / (1 + P * (1 + M / 2));
   return term1 - term2 + term3 - term4;
 }
 
@@ -225,9 +225,8 @@ double likelihood_eta(double *gamma, double *eta, int K, int y) {
   double P = exp(Q);
   double M = compute_M(gamma, eta, K);
   double term1 = y * Q;
-  double term2 = log(1 + P);
-  double term3 = P * M / (2 * square(1 + P));
-  return term1 - term2 - term3;
+  double term2 = log(1 + P * (1 + M / 2));
+  return term1 - term2;
 }
 
 double *compute_deta(double *gamma, double *eta, int K, int y) {
@@ -235,11 +234,10 @@ double *compute_deta(double *gamma, double *eta, int K, int y) {
   double gamma_0 = sum(gamma, K);
   double P = exp(dot_product(gamma, eta, K) / gamma_0);
   double M = compute_M(gamma, eta, K);
-  double term1_const = (y - P / (1 + P) + P * (1 - P) * M / (2 * cube(1 + P))) / gamma_0;
-  double term2_const = P / (2 * square(1 + P));
   for (int i = 0; i < K; i++) {
-    double term1 = gamma[i] * term1_const;
-    double term2 = term2_const * dM_deta_i(gamma, eta, K, i);
+    double coef = gamma[i] / gamma_0; 
+    double term1 = y * coef;
+    double term2 = (P * coef * (1 + M / 2) + dM_deta_i(gamma, eta, K, i)) / (1 + P * (1 + M / 2));
     detas[i] = term1 - term2;
   }
   return detas;

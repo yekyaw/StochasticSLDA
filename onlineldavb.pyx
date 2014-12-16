@@ -37,8 +37,6 @@ cdef extern from "comps.h":
     double *compute_dgamma(double alpha, double *gamma, double *phi_sum, double *eta, int K, int y);
 
     double likelihood_gamma(double alpha, double *gamma, double *phi_sum, double *eta, int K, int y);
-    
-    double compute_M(double *gamma, double *eta, int K);
 
 n.random.seed(100000001)
 meanchangethresh = 0.001
@@ -212,7 +210,7 @@ class OnlineLDA:
         new_eta = eta
         options = { "maxiter": maxiter }
         eta = n.random.randn(self._K)
-        res = minimize(f, eta, method='BFGS', jac=g, options=options)
+        res = minimize(f, eta, method='L-BFGS-B', jac=g, options=options)
         if res.success:
             new_eta = res.x
         return new_eta
@@ -358,12 +356,11 @@ class OnlineLDA:
 
     def _predict(self, gamma):
         gamma_0 = gamma.sum()
-        Q = n.exp(-self._eta.dot(gamma) / gamma_0)
-        cdef n.ndarray[DTYPE_t, mode="c"] gamma_c = double_array(gamma)
-        cdef n.ndarray[DTYPE_t, mode="c"] eta_c = double_array(self._eta)
-        M = compute_M(&gamma_c[0], &eta_c[0], self._K)
-        y = 1 / (1 + Q) - Q * (Q - 1) / (2 * ((Q + 1) ** 3)) * M
-        return int(round(y))
+        prod = self._eta.dot(gamma) / gamma_0
+        if prod > 0:
+            return 1
+        else:
+            return 0
 
     def predict(self, docs):
         wordids, wordcts = parse_doc_list(docs, self._vocab)
