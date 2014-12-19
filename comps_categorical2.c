@@ -2,6 +2,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <gsl/gsl_errno.h>
 #include <gsl/gsl_sf_gamma.h>
 #include <gsl/gsl_sf_psi.h>
@@ -86,110 +87,21 @@ double sum(double *a, int length) {
   return sum;
 }
 
-double gamma_covariance(double *gamma, int K, int i, int j) {
-  double gamma_0 = sum(gamma, K);
-  double denom = square(gamma_0) * (gamma_0 + 1);
-  double cov;
-  if (i == j) {
-      cov = gamma[i] * (gamma_0 - gamma[i]) / denom;
-  }
-  else {
-    cov = -gamma[i] * gamma[j] / denom;
-  }
-  return cov;
-}
-
-double *gamma_covariance_matrix(double *gamma, int K) {
-  double *covs = malloc_matrix(K, K);
-  for (int i = 0; i < K; i++) {
-    for (int j = i; j < K; j++) {
-      double elt = gamma_covariance(gamma, K, i, j);
-      covs[i*K+j] = elt;
-      covs[j*K+i] = elt;
-    }
-  }
-  return covs;
-}
-
-double compute_M(double *gamma, double *eta, int K) {
-  double *covs = gamma_covariance_matrix(gamma, K);
-  double *temp = matrix_multiply(covs, eta, K, K, 1);
-  double *prod = matrix_multiply(eta, temp, 1, K, 1);
-  double M = prod[0];
-  free(covs);
-  free(temp);
-  free(prod);
-  return M;
-}
-
-double hessian_term(double *gamma, int K, int i, int a, int b) {
-  double gamma_0 = sum(gamma, K);
-  double term = square(gamma_0) * (gamma_0 + 1);
-  double term2 = 3 * square(gamma_0) + 2 * gamma_0;
-  double term_sq = term * term;
-  double result;
-  if (a == b) {
-    double gamma_minus_a = sum(gamma, K) - gamma[a];
-    if (i == a) {
-      result = (gamma_minus_a * term - term2 * gamma[a] * gamma_minus_a) / term_sq;
-    }
-    else {
-      result = (gamma[a] * term - term2 * gamma[a] * gamma_minus_a) / term_sq;
-    }
-  }
-  else {
-    if (i == a) {
-      result = (-gamma[b] * term + term2 * gamma[a] * gamma[b]) / term_sq;
-    }
-    else if (i == b) {
-      result = (-gamma[a] * term + term2 * gamma[a] * gamma[b]) / term_sq;
-    }
-    else {
-      result = gamma[a] * gamma[b] * term2 / term_sq;
-    }
-  }
-  return result;
-}
-
-double dM_dgamma_i(double *gamma, double *eta, int K, int i) {
-  double *dcovs = malloc_matrix(K, K);
-  for (int a = 0; a < K; a++) {
-    for (int b = 0; b < K; b++) {
-      dcovs[a*K+b] = hessian_term(gamma, K, i, a, b);
-    }
-  }
-  
-  double *temp = matrix_multiply(dcovs, eta, K, K, 1);
-  double *prod = matrix_multiply(eta, temp, 1, K, 1);
-  double deriv = prod[0];
-  free(dcovs);
-  free(temp);
-  free(prod);
-  return deriv;
-}
-
-double dM_deta_i(double *gamma, double *eta, int K, int i) {
-  double *covs = gamma_covariance_matrix(gamma, K);
-  double deriv = 0;
-  for (int j = 0; j < K; j++) {
-    deriv += eta[j] * (covs[i*K+j] + covs[j*K+i]);
-  }
-  free(covs);
-  return deriv;
-}
-
 double likelihood_gamma(double alpha, double *gamma, double *phi_sum, double *eta, int C, int K, int y) {
   double gamma_0 = sum(gamma, K);
   double psi_gamma_0 = digamma(gamma_0);
   double lngamma_gamma_0 = lgamma(gamma_0);
-  double linear_pred = 0;
-  for (int c = 0; c < C; c++) {
+  double linear_pred = 1;
+  for (int c = 0; c < C - 1; c++) {
     double P_c = exp(dot_product(gamma, &eta[c*K], K) / gamma_0);
     linear_pred += P_c;
   }
   linear_pred = log(linear_pred);
 
-  double Q = dot_product(gamma, &eta[y*K], K) / gamma_0;
+  double Q = 0;
+  if (y < C - 1) {
+    Q = dot_product(gamma, &eta[y*K], K) / gamma_0;
+  }
   double const_terms = -lngamma_gamma_0 + Q - linear_pred;
   double sum = const_terms;
   for (int i = 0; i < K; i++) {
@@ -207,11 +119,13 @@ double compute_dgamma_i(double alpha, double *gamma, double *phi_sum, double *et
     temp_sum += alpha + phi_sum[j] - gamma[j];
   }
   double term2 = trigamma(gamma_0) * temp_sum;
-  double term3 = (eta[y*K+i] * gamma_0 - dot_product(&eta[y*K], gamma, K)) / square(gamma_0);
-;
-  double term4_denom = 0;
+  double term3 = 0;
+  if (y < C - 1) {
+    term3 = (eta[y*K+i] * gamma_0 - dot_product(&eta[y*K], gamma, K)) / square(gamma_0);
+  }
+  double term4_denom = 1;
   double term4_num = 0;
-  for (int c = 0; c < C; c++) {
+  for (int c = 0; c < C - 1; c++) {
     double P_c = exp(dot_product(gamma, &eta[c*K], K) / gamma_0);
     double coef = (eta[c*K+i] * gamma_0 - dot_product(&eta[c*K], gamma, K)) / square(gamma_0);
     term4_num += P_c * coef;
@@ -231,9 +145,12 @@ double *compute_dgamma(double alpha, double *gamma, double *phi_sum, double *eta
 
 double likelihood_eta(double *gamma, double *eta, int C, int K, int y) {
   double gamma_0 = sum(gamma, K);
-  double term1 = dot_product(gamma, &eta[y*K], K) / gamma_0;
-  double term2 = 0;
-  for (int c = 0; c < C; c++) {
+  double term1 = 0;
+  if (y < C - 1) {
+    term1 = dot_product(gamma, &eta[y*K], K) / gamma_0;
+  }
+  double term2 = 1;
+  for (int c = 0; c < C - 1; c++) {
     double P_c = exp(dot_product(gamma, &eta[c*K], K) / gamma_0);
     term2 += P_c;
   }
@@ -242,14 +159,14 @@ double likelihood_eta(double *gamma, double *eta, int C, int K, int y) {
 }
 
 double *compute_deta(double *gamma, double *eta, int C, int K, int y) {
-  double *detas = malloc_matrix(C, K);
+  double *detas = malloc_matrix(C - 1, K);
   double gamma_0 = sum(gamma, K);
-  double term2_denom = 0;
-  for (int j = 0; j < C; j++) {
+  double term2_denom = 1;
+  for (int j = 0; j < C - 1; j++) {
     double P_c = exp(dot_product(gamma, &eta[j*K], K) / gamma_0);
     term2_denom += P_c;
   }
-  for (int c = 0; c < C; c++) {
+  for (int c = 0; c < C - 1; c++) {
     double P_c = exp(dot_product(gamma, &eta[c*K], K) / gamma_0);
     for (int i = 0; i < K; i++) {
       double term1 = gamma[i] / gamma_0;
@@ -275,10 +192,10 @@ double likelihood_eta_batch(double *gammas, double *eta, int *ys, int C, int K, 
 }
 
 double *compute_deta_batch(double *gammas, double *eta, int *ys, int C, int K, int N) {
-  double *detas_sum = (double *) calloc(C*K, sizeof(double));
+  double *detas_sum = (double *) calloc((C - 1) * K, sizeof(double));
   for (int n = 0; n < N; n++) {
     double *detas = compute_deta(&gammas[n*K], eta, C, K, ys[n]);
-    for (int j = 0; j < C*K; j++) {
+    for (int j = 0; j < (C - 1) * K; j++) {
       detas_sum[j] += detas[j];
     }
     free(detas);

@@ -191,7 +191,10 @@ double likelihood_gamma(double alpha, double *gamma, double *phi_sum, double *et
   }
   linear_pred = log(linear_pred);
 
-  double Q = dot_product(gamma, &eta[y*K], K) / gamma_0;
+  double Q = 0;
+  if (y < C - 1) {
+    Q = dot_product(gamma, &eta[y*K], K) / gamma_0;
+  }
   double const_terms = -lngamma_gamma_0 + Q - linear_pred;
   double sum = const_terms;
   for (int i = 0; i < K; i++) {
@@ -209,15 +212,16 @@ double compute_dgamma_i(double alpha, double *gamma, double *phi_sum, double *et
     temp_sum += alpha + phi_sum[j] - gamma[j];
   }
   double term2 = trigamma(gamma_0) * temp_sum;
-  double term3 = (eta[y*K+i] * gamma_0 - dot_product(&eta[y*K], gamma, K)) / square(gamma_0);
-;
+  double term3 = 0;
+  if (y < C - 1) {
+    term3 = (eta[y*K+i] * gamma_0 - dot_product(&eta[y*K], gamma, K)) / square(gamma_0);
+  }
   double term4_denom = 1;
   double term4_num = 0;
   for (int c = 0; c < C - 1; c++) {
     double P_c = exp(dot_product(gamma, &eta[c*K], K) / gamma_0);
     double M_c = compute_M(gamma, &eta[c*K], K);
     double coef = (eta[c*K+i] * gamma_0 - dot_product(&eta[c*K], gamma, K)) / square(gamma_0);
-    ;
     term4_num += P_c * (coef * (1 + M_c / 2) + dM_dgamma_i(gamma, &eta[c*K], K, i));
     term4_denom += P_c * (1 + M_c / 2);
   }
@@ -235,7 +239,10 @@ double *compute_dgamma(double alpha, double *gamma, double *phi_sum, double *eta
 
 double likelihood_eta(double *gamma, double *eta, int C, int K, int y) {
   double gamma_0 = sum(gamma, K);
-  double term1 = dot_product(gamma, &eta[y*K], K) / gamma_0;
+  double term1 = 0;
+  if (y < C - 1) {
+    term1 = dot_product(gamma, &eta[y*K], K) / gamma_0;
+  }
   double term2 = 1;
   for (int c = 0; c < C - 1; c++) {
     double P_c = exp(dot_product(gamma, &eta[c*K], K) / gamma_0);
@@ -247,7 +254,7 @@ double likelihood_eta(double *gamma, double *eta, int C, int K, int y) {
 }
 
 double *compute_deta(double *gamma, double *eta, int C, int K, int y) {
-  double *detas = malloc_matrix(C, K);
+  double *detas = malloc_matrix(C - 1, K);
   double gamma_0 = sum(gamma, K);
   double term2_denom = 1;
   for (int j = 0; j < C - 1; j++) {
@@ -270,7 +277,6 @@ double *compute_deta(double *gamma, double *eta, int C, int K, int y) {
       }
     }
   }
-  memset(&eta[(C-1)*K], 0, K);
   return detas;
 }
 
@@ -283,10 +289,10 @@ double likelihood_eta_batch(double *gammas, double *eta, int *ys, int C, int K, 
 }
 
 double *compute_deta_batch(double *gammas, double *eta, int *ys, int C, int K, int N) {
-  double *detas_sum = (double *) calloc(C*K, sizeof(double));
+  double *detas_sum = (double *) calloc((C - 1) * K, sizeof(double));
   for (int n = 0; n < N; n++) {
     double *detas = compute_deta(&gammas[n*K], eta, C, K, ys[n]);
-    for (int j = 0; j < C*K; j++) {
+    for (int j = 0; j < (C - 1) * K; j++) {
       detas_sum[j] += detas[j];
     }
     free(detas);

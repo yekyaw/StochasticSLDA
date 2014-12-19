@@ -153,8 +153,7 @@ class OnlineLDA:
 
         # Initialize the variational distribution q(beta|lambda)
         self._lambda = 1*n.random.gamma(100., 1./100., (self._K, self._W))
-        self._eta = n.random.randn(self._C, self._K)
-        self._eta[-1,:] = n.zeros(self._K)
+        self._eta = n.random.randn(self._C - 1, self._K)
         
     def _dgamma(self, gamma, phi_sum, y):
         cdef n.ndarray[DTYPE_t, ndim=2, mode="c"] eta_c = double_matrix(self._eta)
@@ -175,7 +174,6 @@ class OnlineLDA:
 
     def _deta_1d(self, eta, gammas, ys):
         eta_2d = eta.reshape(self._C - 1, self._K)
-        eta_2d = n.vstack([eta_2d, n.zeros(self._K)])
         deta = self._deta(eta_2d, gammas, ys)
         return deta[:self._C-1,:].flatten()
 
@@ -185,14 +183,13 @@ class OnlineLDA:
         cdef n.ndarray[int, mode="c"] ys_c = int_array(ys)
         cdef double *detas_c = compute_deta_batch(&gamma_c[0,0], &eta_c[0,0], &ys_c[0], self._C, self._K, len(ys))
 
-        detas = [detas_c[i] for i in range(self._C * self._K)]
-        detas = n.reshape(detas, (self._C, self._K))
+        detas = [detas_c[i] for i in range((self._C - 1) * self._K)]
+        detas = n.reshape(detas, (self._C - 1, self._K))
         free(detas_c)
         return detas
 
     def _likelihood_eta_1d(self, eta, gammas, ys):
         eta_2d = eta.reshape(self._C - 1, self._K)
-        eta_2d = n.vstack([eta_2d, n.zeros(self._K)])
         return self._likelihood_eta(eta_2d, gammas, ys)
 
     def _likelihood_eta(self, eta, gammas, ys):
@@ -223,7 +220,6 @@ class OnlineLDA:
         res = minimize(f, eta, method='L-BFGS-B', jac=g, options=options)
         if res.success:
             new_eta = res.x.reshape(self._C - 1, self._K)
-            new_eta = n.vstack([new_eta, n.zeros(self._K)])
         return new_eta
 
     def estimate_gamma(self, docs):
@@ -251,7 +247,7 @@ class OnlineLDA:
 
         # Initialize the variational distribution q(theta|gamma) for
         # the mini-batch
-        gamma = 1*n.random.gamma(100., 1./100., (batchD, self._K))
+        gamma = n.random.gamma(100., 1./100., (batchD, self._K))
         Elogtheta = dirichlet_expectation(gamma)
         expElogtheta = n.exp(Elogtheta)
         Elogbeta = dirichlet_expectation(self._lambda)
@@ -367,7 +363,8 @@ class OnlineLDA:
             self.update_lambda(wordids, wordcts, batch_ys)
 
     def _mle_predict(self, gamma):
-        probs = [self._eta[c,:].dot(gamma) for c in range(self._C)]
+        probs = [self._eta[c, :].dot(gamma) for c in range(self._C - 1)]
+        probs.append(0.)
         return n.argmax(probs)
 
     def predict(self, docs):
