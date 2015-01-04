@@ -178,14 +178,14 @@ double dM_deta_i(double *gamma, double *eta, int K, int i) {
   return deriv;
 }
 
-double likelihood_gamma(double alpha, double *gamma, double *phi_sum, double *eta, int K, int y) {
+double likelihood_gamma(double alpha, double *gamma, double *phi_sum, double *eta, double sigma, int K, int y) {
   double gamma_0 = sum(gamma, K);
   double psi_gamma_0 = digamma(gamma_0);
   double lngamma_gamma_0 = lgamma(gamma_0);
   double Q = dot_product(gamma, eta, K) / gamma_0;
   double P = exp(Q);
   double M = compute_M(gamma, eta, K);
-  double const_terms = -lngamma_gamma_0 + y * Q - log(1 + P * (1 + M / 2));
+  double const_terms = -lngamma_gamma_0 + (y * Q - log(1 + P * (1 + M / 2))) / sigma;
   double sum = const_terms;
   for (int i = 0; i < K; i++) {
     double coef = digamma(gamma[i]) - psi_gamma_0;
@@ -194,7 +194,7 @@ double likelihood_gamma(double alpha, double *gamma, double *phi_sum, double *et
   return sum;
 }
 
-double compute_dgamma_i(double alpha, double *gamma, double *phi_sum, double *eta, int K, int y, int i) {
+double compute_dgamma_i(double alpha, double *gamma, double *phi_sum, double *eta, double sigma, int K, int y, int i) {
   double gamma_0 = sum(gamma, K);
   double P = exp(dot_product(gamma, eta, K) / gamma_0);
   double term1 = trigamma(gamma[i]) * (alpha + phi_sum[i] - gamma[i]);
@@ -208,28 +208,28 @@ double compute_dgamma_i(double alpha, double *gamma, double *phi_sum, double *et
   double coef = (eta[i] * gamma_0 - dot_product(eta, gamma, K)) / square(gamma_0);
   double term3 = coef * y;
   double term4 = (P * coef * (1 + M / 2) + dM_dgamma_i(gamma, eta, K, i)) / (1 + P * (1 + M / 2));
-  return term1 - term2 + term3 - term4;
+  return term1 - term2 + (term3 - term4) / sigma;
 }
 
-double *compute_dgamma(double alpha, double *gamma, double *phi_sum, double *eta, int K, int y) {
+double *compute_dgamma(double alpha, double *gamma, double *phi_sum, double *eta, double sigma, int K, int y) {
   double *dgammas = malloc_vector(K);
   for (int i = 0; i < K; i++) {
-    dgammas[i] = compute_dgamma_i(alpha, gamma, phi_sum, eta, K, y, i);
+    dgammas[i] = compute_dgamma_i(alpha, gamma, phi_sum, eta, sigma, K, y, i);
   }
   return dgammas;
 }
 
-double likelihood_eta(double *gamma, double *eta, int K, int y) {
+double likelihood_eta(double *gamma, double *eta, double sigma, int K, int y) {
   double gamma_0 = sum(gamma, K);
   double Q = dot_product(gamma, eta, K) / gamma_0;
   double P = exp(Q);
   double M = compute_M(gamma, eta, K);
   double term1 = y * Q;
   double term2 = log(1 + P * (1 + M / 2));
-  return term1 - term2;
+  return (term1 - term2) / sigma;
 }
 
-double *compute_deta(double *gamma, double *eta, int K, int y) {
+double *compute_deta(double *gamma, double *eta, double sigma, int K, int y) {
   double *detas = malloc_vector(K);
   double gamma_0 = sum(gamma, K);
   double P = exp(dot_product(gamma, eta, K) / gamma_0);
@@ -238,23 +238,23 @@ double *compute_deta(double *gamma, double *eta, int K, int y) {
     double coef = gamma[i] / gamma_0; 
     double term1 = y * coef;
     double term2 = (P * coef * (1 + M / 2) + dM_deta_i(gamma, eta, K, i)) / (1 + P * (1 + M / 2));
-    detas[i] = term1 - term2;
+    detas[i] = (term1 - term2) / sigma;
   }
   return detas;
 }
 
-double likelihood_eta_batch(double *gammas, double *eta, int *ys, int K, int N) {
+double likelihood_eta_batch(double *gammas, double *eta, double sigma, int *ys, int K, int N) {
   double sum = 0;
   for (int n = 0; n < N; n++) {
-    sum += likelihood_eta(&gammas[n*K], eta, K, ys[n]);
+    sum += likelihood_eta(&gammas[n*K], eta, sigma, K, ys[n]);
   }
   return sum;
 }
 
-double *compute_deta_batch(double *gammas, double *eta, int *ys, int K, int N) {
+double *compute_deta_batch(double *gammas, double *eta, double sigma, int *ys, int K, int N) {
   double *detas_sum = (double *) calloc(K, sizeof(double));
   for (int n = 0; n < N; n++) {
-    double *detas = compute_deta(&gammas[n*K], eta, K, ys[n]);
+    double *detas = compute_deta(&gammas[n*K], eta, sigma, K, ys[n]);
     for (int i = 0; i < K; i++) {
       detas_sum[i] += detas[i];
     }
@@ -262,3 +262,32 @@ double *compute_deta_batch(double *gammas, double *eta, int *ys, int K, int N) {
   }
   return detas_sum;
 }
+
+/* double compute_dsigma(double *gammas, double *eta, double sigma, int *ys, int K, int N) { */
+/*   double ss = 0; */
+/*   for (int n = 0; n < N; n++) { */
+/*     double *gamma = &gammas[n*K]; */
+/*     int y = ys[n]; */
+/*     double gamma_0 = sum(gamma, K); */
+/*     double Q = dot_product(gamma, eta, K) / gamma_0; */
+/*     double P = exp(Q); */
+/*     double M = compute_M(gamma, eta, K); */
+/*     ss += y * Q - log(1 + P * (1 + M / 2)); */
+/*   } */
+/*   return -ss / square(sigma); */
+/* } */
+
+/* double optimize_sigma(double *gammas, double *eta, int *ys, int K, int N) { */
+/*   double num = 0, denom = 0; */
+/*   for (int n = 0; n < N; n++) { */
+/*     double *gamma = &gammas[n*K]; */
+/*     int y = ys[n]; */
+/*     double gamma_0 = sum(gamma, K); */
+/*     double Q = dot_product(gamma, eta, K) / gamma_0; */
+/*     double P = exp(Q); */
+/*     double M = compute_M(gamma, eta, K); */
+/*     num += y * Q; */
+/*     denom += log(1 + P * (1 + M / 2)); */
+/*   } */
+/*   return num / denom; */
+/* } */

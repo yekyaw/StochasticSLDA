@@ -30,13 +30,17 @@ DTYPE = n.double
 ctypedef n.double_t DTYPE_t
 
 cdef extern from "comps.h":
-    double likelihood_eta_batch(double *gammas, double *eta, int *ys, int K, int N);
+    double likelihood_eta_batch(double *gammas, double *eta, double sigma, int *ys, int K, int N);
 
-    double *compute_deta_batch(double *gammas, double *eta, int *ys, int K, int N);
+    double *compute_deta_batch(double *gammas, double *eta, double sigma, int *ys, int K, int N);
 
-    double *compute_dgamma(double alpha, double *gamma, double *phi_sum, double *eta, int K, int y);
+    double *compute_dgamma(double alpha, double *gamma, double *phi_sum, double *eta, double sigma, int K, int y);
 
-    double likelihood_gamma(double alpha, double *gamma, double *phi_sum, double *eta, int K, int y);
+    double likelihood_gamma(double alpha, double *gamma, double *phi_sum, double *eta, double sigma, int K, int y);
+
+#    double optimize_sigma(double *gammas, double *eta, int *ys, int K, int N);
+
+#    double compute_dsigma(double *gammas, double *eta, double sigma, int *ys, int K, int N);
 
 n.random.seed(100000001)
 meanchangethresh = 0.001
@@ -116,7 +120,7 @@ class OnlineLDA:
     Implements online VB for LDA as described in (Hoffman et al. 2010).
     """
 
-    def __init__(self, vocab, K, D, alpha, zeta, tau0, kappa):
+    def __init__(self, vocab, K, D, alpha, zeta, tau0=64, kappa=0.7, sigma=1.):
         """
         Arguments:
         K: Number of topics
@@ -153,13 +157,14 @@ class OnlineLDA:
         # Initialize the variational distribution q(beta|lambda)
         self._lambda = 1*n.random.gamma(100., 1./100., (self._K, self._W))
         self._eta = n.random.randn(self._K)
+        self._sigma = sigma
 
     def _dgamma(self, gamma, phi_sum, y):
         cdef n.ndarray[DTYPE_t, mode="c"] eta_c = double_array(self._eta)
         cdef n.ndarray[DTYPE_t, mode="c"] phi_sum_c = double_array(phi_sum)
         cdef n.ndarray[DTYPE_t, mode="c"] gamma_c = double_array(gamma)
         cdef double *dgammas_c = compute_dgamma(self._alpha, &gamma_c[0], &phi_sum_c[0],
-                                                  &eta_c[0], self._K, y);
+                                                  &eta_c[0], self._sigma, self._K, y);
         dgammas = n.zeros(self._K)
         for i in range(self._K):
             dgammas[i] = dgammas_c[i]
@@ -170,14 +175,14 @@ class OnlineLDA:
         cdef n.ndarray[DTYPE_t, mode="c"] eta_c = double_array(self._eta)
         cdef n.ndarray[DTYPE_t, mode="c"] phi_sum_c = double_array(phi_sum)
         cdef n.ndarray[DTYPE_t, mode="c"] gamma_c = double_array(gamma)
-        cdef double likelihood = likelihood_gamma(self._alpha, &gamma_c[0], &phi_sum_c[0], &eta_c[0], self._K, y)
+        cdef double likelihood = likelihood_gamma(self._alpha, &gamma_c[0], &phi_sum_c[0], &eta_c[0], self._sigma, self._K, y)
         return likelihood
 
     def _deta(self, eta, gammas, ys):
         cdef n.ndarray[DTYPE_t, ndim=2, mode="c"] gamma_c = double_matrix(gammas)
         cdef n.ndarray[DTYPE_t, mode="c"] eta_c = double_array(eta)
         cdef n.ndarray[int, mode="c"] ys_c = int_array(ys)
-        cdef double *detas_c = compute_deta_batch(&gamma_c[0,0], &eta_c[0], &ys_c[0], self._K, len(ys))
+        cdef double *detas_c = compute_deta_batch(&gamma_c[0,0], &eta_c[0], self._sigma, &ys_c[0], self._K, len(ys))
 
         detas = n.zeros(self._K)
         for i in range(self._K):
@@ -189,7 +194,7 @@ class OnlineLDA:
         cdef n.ndarray[DTYPE_t, ndim=2, mode="c"] gamma_c = double_matrix(gammas)
         cdef n.ndarray[DTYPE_t, mode="c"] eta_c = double_array(eta)
         cdef n.ndarray[int, mode="c"] ys_c = int_array(ys)
-        cdef double likelihood = likelihood_eta_batch(&gamma_c[0,0], &eta_c[0], &ys_c[0], self._K, len(ys))
+        cdef double likelihood = likelihood_eta_batch(&gamma_c[0,0], &eta_c[0], self._sigma, &ys_c[0], self._K, len(ys))
         return likelihood
 
     def _optimize_gamma(self, gamma, phi_sum, y, maxiter=20):
@@ -214,6 +219,20 @@ class OnlineLDA:
         if res.success:
             new_eta = res.x
         return new_eta
+
+    # def _dsigma(self, gammas, ys):
+    #     cdef n.ndarray[DTYPE_t, ndim=2, mode="c"] gamma_c = double_matrix(gammas)
+    #     cdef n.ndarray[DTYPE_t, mode="c"] eta_c = double_array(self._eta)
+    #     cdef n.ndarray[int, mode="c"] ys_c = int_array(ys)
+    #     cdef double dsigma = compute_dsigma(&gamma_c[0,0], &eta_c[0], self._sigma, &ys_c[0], self._K, len(ys))
+    #     return dsigma
+
+    # def _optimize_sigma(self, gammas, ys):
+    #     cdef n.ndarray[DTYPE_t, ndim=2, mode="c"] gamma_c = double_matrix(gammas)
+    #     cdef n.ndarray[DTYPE_t, mode="c"] eta_c = double_array(self._eta)
+    #     cdef n.ndarray[int, mode="c"] ys_c = int_array(ys)
+    #     cdef double sigma = optimize_sigma(&gamma_c[0,0], &eta_c[0], &ys_c[0], self._K, len(ys))
+    #     return sigma
 
     def estimate_gamma(self, docs):
         wordids, wordcts = parse_doc_list(docs, self._vocab)
@@ -300,7 +319,8 @@ class OnlineLDA:
             (gammas, sstats) = self.do_e_step(wordids, wordcts, ys)
             self._lambda = self._zeta + sstats
             self._eta = self._optimize_eta(self._eta, gammas, ys)
-            print self._eta        
+#            self._sigma = self._optimize_sigma(gammas, ys)
+            print self._eta
 
     def update_lambda(self, wordids, wordcts, ys):
         """
@@ -338,6 +358,8 @@ class OnlineLDA:
         self._lambda = self._lambda * (1-rhot) + \
             rhot * (self._zeta + self._D * sstats / batchD)
         self._eta += rhot * self._deta(self._eta, gammas, ys) * self._D / batchD
+#        self._sigma = self._sigma * (1-rhot) + \
+ #         rhot * self._optimize_sigma(gammas, ys) * self._D / batchD
         
         self._updatect += 1
         print self._eta

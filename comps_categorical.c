@@ -179,23 +179,25 @@ double dM_deta_i(double *gamma, double *eta, int K, int i) {
   return deriv;
 }
 
-double likelihood_gamma(double alpha, double *gamma, double *phi_sum, double *eta, int C, int K, int y) {
+double compute_elognorm(double *gamma, double *eta, int C, int K) {
+  double gamma_0 = sum(gamma, K);
+  double elognorm = 0;
+  for (int c = 0; c < C; c++) {
+    double P_c = exp(dot_product(gamma, &eta[c*K], K) / gamma_0);
+    double M_c = compute_M(gamma, &eta[c*K], K);
+    elognorm += P_c * (1 + M_c / 2);
+  }
+  elognorm = log(elognorm);
+  return elognorm;
+}
+
+double likelihood_gamma(double alpha, double *gamma, double *phi_sum, double *eta, double sigma, int C, int K, int y) {
   double gamma_0 = sum(gamma, K);
   double psi_gamma_0 = digamma(gamma_0);
   double lngamma_gamma_0 = lgamma(gamma_0);
-  double linear_pred = 1;
-  for (int c = 0; c < C - 1; c++) {
-    double P_c = exp(dot_product(gamma, &eta[c*K], K) / gamma_0);
-    double M_c = compute_M(gamma, &eta[c*K], K);
-    linear_pred += P_c * (1 + M_c / 2);
-  }
-  linear_pred = log(linear_pred);
-
-  double Q = 0;
-  if (y < C - 1) {
-    Q = dot_product(gamma, &eta[y*K], K) / gamma_0;
-  }
-  double const_terms = -lngamma_gamma_0 + Q - linear_pred;
+  double Q = dot_product(gamma, &eta[y*K], K) / gamma_0;
+  double elognorm = compute_elognorm(gamma, eta, C, K);
+  double const_terms = -lngamma_gamma_0 + (Q - elognorm) / sigma;
   double sum = const_terms;
   for (int i = 0; i < K; i++) {
     double coef = digamma(gamma[i]) - psi_gamma_0;
@@ -204,7 +206,7 @@ double likelihood_gamma(double alpha, double *gamma, double *phi_sum, double *et
   return sum;
 }
 
-double compute_dgamma_i(double alpha, double *gamma, double *phi_sum, double *eta, int C, int K, int y, int i) {
+double compute_dgamma_i(double alpha, double *gamma, double *phi_sum, double *eta, double sigma, int C, int K, int y, int i) {
   double gamma_0 = sum(gamma, K);
   double term1 = trigamma(gamma[i]) * (alpha + phi_sum[i] - gamma[i]);
   double temp_sum = 0;
@@ -212,13 +214,10 @@ double compute_dgamma_i(double alpha, double *gamma, double *phi_sum, double *et
     temp_sum += alpha + phi_sum[j] - gamma[j];
   }
   double term2 = trigamma(gamma_0) * temp_sum;
-  double term3 = 0;
-  if (y < C - 1) {
-    term3 = (eta[y*K+i] * gamma_0 - dot_product(&eta[y*K], gamma, K)) / square(gamma_0);
-  }
-  double term4_denom = 1;
+  double term3 = (eta[y*K+i] * gamma_0 - dot_product(&eta[y*K], gamma, K)) / square(gamma_0);
+  double term4_denom = 0;
   double term4_num = 0;
-  for (int c = 0; c < C - 1; c++) {
+  for (int c = 0; c < C; c++) {
     double P_c = exp(dot_product(gamma, &eta[c*K], K) / gamma_0);
     double M_c = compute_M(gamma, &eta[c*K], K);
     double coef = (eta[c*K+i] * gamma_0 - dot_product(&eta[c*K], gamma, K)) / square(gamma_0);
@@ -226,43 +225,34 @@ double compute_dgamma_i(double alpha, double *gamma, double *phi_sum, double *et
     term4_denom += P_c * (1 + M_c / 2);
   }
   double term4 = term4_num / term4_denom;
-  return term1 - term2 + term3 - term4;
+  return term1 - term2 + (term3 - term4) / sigma;
 }
 
-double *compute_dgamma(double alpha, double *gamma, double *phi_sum, double *eta, int C, int K, int y) {
+double *compute_dgamma(double alpha, double *gamma, double *phi_sum, double *eta, double sigma, int C, int K, int y) {
   double *dgammas = malloc_vector(K);
   for (int i = 0; i < K; i++) {
-    dgammas[i] = compute_dgamma_i(alpha, gamma, phi_sum, eta, C, K, y, i);
+    dgammas[i] = compute_dgamma_i(alpha, gamma, phi_sum, eta, sigma, C, K, y, i);
   }
   return dgammas;
 }
 
-double likelihood_eta(double *gamma, double *eta, int C, int K, int y) {
+double likelihood_eta(double *gamma, double *eta, double sigma, int C, int K, int y) {
   double gamma_0 = sum(gamma, K);
-  double term1 = 0;
-  if (y < C - 1) {
-    term1 = dot_product(gamma, &eta[y*K], K) / gamma_0;
-  }
-  double term2 = 1;
-  for (int c = 0; c < C - 1; c++) {
-    double P_c = exp(dot_product(gamma, &eta[c*K], K) / gamma_0);
-    double M_c = compute_M(gamma, &eta[c*K], K);
-    term2 += P_c * (1 + M_c / 2);
-  }
-  term2 = log(term2);
-  return term1 - term2;
+  double term1 = dot_product(gamma, &eta[y*K], K) / gamma_0;
+  double term2 = compute_elognorm(gamma, eta, C, K);
+  return (term1 - term2) / sigma;
 }
 
-double *compute_deta(double *gamma, double *eta, int C, int K, int y) {
-  double *detas = malloc_matrix(C - 1, K);
+double *compute_deta(double *gamma, double *eta, double sigma, int C, int K, int y) {
+  double *detas = malloc_matrix(C, K);
   double gamma_0 = sum(gamma, K);
-  double term2_denom = 1;
-  for (int j = 0; j < C - 1; j++) {
+  double term2_denom = 0;
+  for (int j = 0; j < C; j++) {
     double P_c = exp(dot_product(gamma, &eta[j*K], K) / gamma_0);
     double M_c = compute_M(gamma, &eta[j*K], K);
     term2_denom += P_c * (1 + M_c / 2);
   }
-  for (int c = 0; c < C - 1; c++) {
+  for (int c = 0; c < C; c++) {
     double P_c = exp(dot_product(gamma, &eta[c*K], K) / gamma_0);
     double M_c = compute_M(gamma, &eta[c*K], K);
     for (int i = 0; i < K; i++) {
@@ -270,32 +260,60 @@ double *compute_deta(double *gamma, double *eta, int C, int K, int y) {
       double term2_num = P_c * (term1 * (1 + M_c / 2) + dM_deta_i(gamma, &eta[c*K], K, i));
       double term2 = term2_num / term2_denom;
       if (c == y) {
-	detas[c*K+i] = term1 - term2;
+	detas[c*K+i] = (term1 - term2) / sigma;
       }
       else {
-	detas[c*K+i] = -term2;
+	detas[c*K+i] = -term2 / sigma;
       }
     }
   }
   return detas;
 }
 
-double likelihood_eta_batch(double *gammas, double *eta, int *ys, int C, int K, int N) {
+double likelihood_eta_batch(double *gammas, double *eta, double sigma, int *ys, int C, int K, int N) {
   double sum = 0;
   for (int n = 0; n < N; n++) {
-    sum += likelihood_eta(&gammas[n*K], eta, C, K, ys[n]);
+    sum += likelihood_eta(&gammas[n*K], eta, sigma, C, K, ys[n]);
   }
   return sum;
 }
 
-double *compute_deta_batch(double *gammas, double *eta, int *ys, int C, int K, int N) {
-  double *detas_sum = (double *) calloc((C - 1) * K, sizeof(double));
+double *compute_deta_batch(double *gammas, double *eta, double sigma, int *ys, int C, int K, int N) {
+  double *detas_sum = (double *) calloc(C * K, sizeof(double));
   for (int n = 0; n < N; n++) {
-    double *detas = compute_deta(&gammas[n*K], eta, C, K, ys[n]);
-    for (int j = 0; j < (C - 1) * K; j++) {
+    double *detas = compute_deta(&gammas[n*K], eta, sigma, C, K, ys[n]);
+    for (int j = 0; j < C * K; j++) {
       detas_sum[j] += detas[j];
     }
     free(detas);
   }
   return detas_sum;
 }
+
+/* double compute_dsigma(double *gammas, double *eta, double sigma, int *ys, int C, int K, int N) { */
+/*   double ss = 0; */
+/*   for (int n = 0; n < N; n++) { */
+/*     double *gamma = &gammas[n*K]; */
+/*     int y = ys[n]; */
+/*     double gamma_0 = sum(gamma, K); */
+/*     double Q = dot_product(gamma, &eta[y*K], K) / gamma_0; */
+/*     double elognorm = compute_elognorm(gamma, eta, C, K); */
+/*     ss += Q - elognorm; */
+/*   } */
+/*   return -ss / square(sigma); */
+/* } */
+
+
+/* double optimize_sigma(double *gammas, double *eta, int *ys, int C, int K, int N) { */
+/*   double num = 0, denom = 0; */
+/*   for (int n = 0; n < N; n++) { */
+/*     double *gamma = &gammas[n*K]; */
+/*     int y = ys[n]; */
+/*     double gamma_0 = sum(gamma, K); */
+/*     double Q = dot_product(gamma, &eta[y*K], K) / gamma_0; */
+/*     double elognorm = compute_elognorm(gamma, eta, C, K); */
+/*     num += Q; */
+/*     denom += elognorm; */
+/*   } */
+/*   return num / denom; */
+/* } */
